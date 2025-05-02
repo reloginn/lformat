@@ -1,6 +1,5 @@
 use fhex::ToHex;
 use std::convert::{TryFrom, TryInto};
-use std::ffi::{CStr, CString};
 
 use crate::{
     FormatError, Result,
@@ -12,80 +11,6 @@ pub trait Format {
     fn format(&self, spec: &ConversionSpecifier) -> Result<String>;
     /// Get `self` as an integer for use as a field width, if possible.
     fn as_int(&self) -> Option<i32>;
-}
-
-impl Format for u64 {
-    fn format(&self, spec: &ConversionSpecifier) -> Result<String> {
-        let mut base = 10;
-        let mut digits: Vec<char> = "0123456789".chars().collect();
-        let mut alt_prefix = "";
-        match spec.conversion_type {
-            ConversionType::DecInt => {}
-            ConversionType::HexIntLower => {
-                base = 16;
-                digits = "0123456789abcdef".chars().collect();
-                alt_prefix = "0x";
-            }
-            ConversionType::HexIntUpper => {
-                base = 16;
-                digits = "0123456789ABCDEF".chars().collect();
-                alt_prefix = "0X";
-            }
-            ConversionType::OctInt => {
-                base = 8;
-                digits = "01234567".chars().collect();
-                alt_prefix = "0";
-            }
-            _ => {
-                return Err(FormatError::WrongType);
-            }
-        }
-        let prefix = if spec.alt_form {
-            alt_prefix.to_owned()
-        } else {
-            String::new()
-        };
-
-        let mut rev_num = String::new();
-        let mut n = *self;
-        while n > 0 {
-            let digit = n % base;
-            n /= base;
-            rev_num.push(digits[digit as usize]);
-        }
-        if rev_num.is_empty() {
-            rev_num.push('0');
-        }
-
-        let width: usize = match spec.width {
-            NumericParam::Literal(w) => w,
-        }
-        .try_into()
-        .unwrap_or_default();
-        let formatted = if spec.left_adj {
-            let mut num_str = prefix + &rev_num.chars().rev().collect::<String>();
-            while num_str.len() < width {
-                num_str.push(' ');
-            }
-            num_str
-        } else if spec.zero_pad {
-            while prefix.len() + rev_num.len() < width {
-                rev_num.push('0');
-            }
-            prefix + &rev_num.chars().rev().collect::<String>()
-        } else {
-            let mut num_str = prefix + &rev_num.chars().rev().collect::<String>();
-            while num_str.len() < width {
-                num_str = " ".to_owned() + &num_str;
-            }
-            num_str
-        };
-
-        Ok(formatted)
-    }
-    fn as_int(&self) -> Option<i32> {
-        i32::try_from(*self).ok()
-    }
 }
 
 impl Format for i64 {
@@ -104,151 +29,159 @@ impl Format for i64 {
                     ""
                 }
                 .to_owned();
-                let mut mod_spec = *spec;
-                mod_spec.width = match spec.width {
-                    NumericParam::Literal(w) => NumericParam::Literal(w - sign_prefix.len() as i32),
+
+                let base = 10;
+                let digits: Vec<char> = "0123456789".chars().collect();
+                let alt_prefix = "";
+                let mut prefix = String::new();
+
+                if spec.alt_form && base != 10 {
+                    prefix = alt_prefix.to_owned();
+                }
+
+                prefix = sign_prefix + &prefix;
+
+                let mut rev_num = String::new();
+                let mut n = abs_val as u64;
+                while n > 0 {
+                    let digit = n % (base as u64);
+                    n /= base as u64;
+                    rev_num.push(digits[digit as usize]);
+                }
+                if rev_num.is_empty() {
+                    rev_num.push('0');
+                }
+
+                let width: usize = match spec.width {
+                    NumericParam::Literal(w) => w,
+                }
+                .try_into()
+                .unwrap_or_default();
+
+                let formatted = if spec.left_adj {
+                    let mut num_str = prefix + &rev_num.chars().rev().collect::<String>();
+                    while num_str.len() < width {
+                        num_str.push(' ');
+                    }
+                    num_str
+                } else if spec.zero_pad {
+                    while prefix.len() + rev_num.len() < width {
+                        rev_num.push('0');
+                    }
+                    prefix + &rev_num.chars().rev().collect::<String>()
+                } else {
+                    let mut num_str = prefix + &rev_num.chars().rev().collect::<String>();
+                    while num_str.len() < width {
+                        num_str = " ".to_owned() + &num_str;
+                    }
+                    num_str
                 };
 
-                let formatted = (abs_val as u64).format(&mod_spec)?;
-                let mut actual_number = &formatted[0..];
-                let mut leading_spaces = &formatted[0..0];
-                if let Some(first_non_space) = formatted.find(|c| c != ' ') {
-                    actual_number = &formatted[first_non_space..];
-                    leading_spaces = &formatted[0..first_non_space];
+                Ok(formatted)
+            }
+            ConversionType::HexIntLower | ConversionType::HexIntUpper | ConversionType::OctInt => {
+                let mut base = 10;
+                let mut digits: Vec<char> = "0123456789".chars().collect();
+                let mut alt_prefix = "";
+
+                match spec.conversion_type {
+                    ConversionType::HexIntLower => {
+                        base = 16;
+                        digits = "0123456789abcdef".chars().collect();
+                        alt_prefix = "0x";
+                    }
+                    ConversionType::HexIntUpper => {
+                        base = 16;
+                        digits = "0123456789ABCDEF".chars().collect();
+                        alt_prefix = "0X";
+                    }
+                    ConversionType::OctInt => {
+                        base = 8;
+                        digits = "01234567".chars().collect();
+                        alt_prefix = "0";
+                    }
+                    _ => {}
                 }
-                Ok(leading_spaces.to_owned() + &sign_prefix + actual_number)
-            }
-            ConversionType::HexIntLower | ConversionType::HexIntUpper | ConversionType::OctInt => {
-                (*self as u64).format(spec)
-            }
-            _ => Err(FormatError::WrongType),
-        }
-    }
-    fn as_int(&self) -> Option<i32> {
-        i32::try_from(*self).ok()
-    }
-}
 
-impl Format for i32 {
-    fn format(&self, spec: &ConversionSpecifier) -> Result<String> {
-        match spec.conversion_type {
-            // signed integer format
-            ConversionType::DecInt => (*self as i64).format(spec),
-            // unsigned-only formats
-            ConversionType::HexIntLower | ConversionType::HexIntUpper | ConversionType::OctInt => {
-                (*self as u32).format(spec)
-            }
-            _ => Err(FormatError::WrongType),
-        }
-    }
-    fn as_int(&self) -> Option<i32> {
-        Some(*self)
-    }
-}
-
-impl Format for u32 {
-    fn format(&self, spec: &ConversionSpecifier) -> Result<String> {
-        match spec.conversion_type {
-            ConversionType::Char => {
-                if let Some(c) = char::from_u32(*self) {
-                    c.format(spec)
+                let prefix = if spec.alt_form {
+                    alt_prefix.to_owned()
                 } else {
-                    Err(FormatError::WrongType)
-                }
-            }
-            _ => (*self as u64).format(spec),
-        }
-    }
-    fn as_int(&self) -> Option<i32> {
-        i32::try_from(*self).ok()
-    }
-}
+                    String::new()
+                };
 
-impl Format for i16 {
-    fn format(&self, spec: &ConversionSpecifier) -> Result<String> {
-        match spec.conversion_type {
-            ConversionType::DecInt => (*self as i64).format(spec),
-            ConversionType::HexIntLower | ConversionType::HexIntUpper | ConversionType::OctInt => {
-                (*self as u16).format(spec)
+                let sign_prefix = if *self < 0 { "-" } else { "" }.to_owned();
+
+                let prefix = sign_prefix + &prefix;
+
+                let mut rev_num = String::new();
+                let mut n = self.unsigned_abs();
+                while n > 0 {
+                    let digit = n % base;
+                    n /= base;
+                    rev_num.push(digits[digit as usize]);
+                }
+                if rev_num.is_empty() {
+                    rev_num.push('0');
+                }
+
+                let width: usize = match spec.width {
+                    NumericParam::Literal(w) => w,
+                }
+                .try_into()
+                .unwrap_or_default();
+                let formatted = if spec.left_adj {
+                    let mut num_str = prefix + &rev_num.chars().rev().collect::<String>();
+                    while num_str.len() < width {
+                        num_str.push(' ');
+                    }
+                    num_str
+                } else if spec.zero_pad {
+                    while prefix.len() + rev_num.len() < width {
+                        rev_num.push('0');
+                    }
+                    prefix + &rev_num.chars().rev().collect::<String>()
+                } else {
+                    let mut num_str = prefix + &rev_num.chars().rev().collect::<String>();
+                    while num_str.len() < width {
+                        num_str = " ".to_owned() + &num_str;
+                    }
+                    num_str
+                };
+
+                Ok(formatted)
+            }
+            ConversionType::Char => {
+                if *self >= 0 && *self <= 0x10FFFF {
+                    if let Some(c) = char::from_u32(*self as u32) {
+                        return c.format(spec);
+                    }
+                }
+                Err(FormatError::WrongType)
             }
             _ => Err(FormatError::WrongType),
         }
     }
     fn as_int(&self) -> Option<i32> {
-        Some(*self as i32)
-    }
-}
-
-impl Format for u16 {
-    fn format(&self, spec: &ConversionSpecifier) -> Result<String> {
-        match spec.conversion_type {
-            ConversionType::Char => {
-                if let Some(Ok(c)) = char::decode_utf16([*self]).next() {
-                    c.format(spec)
-                } else {
-                    Err(FormatError::WrongType)
-                }
-            }
-            _ => (*self as u64).format(spec),
-        }
-    }
-    fn as_int(&self) -> Option<i32> {
-        Some(*self as i32)
-    }
-}
-
-impl Format for i8 {
-    fn format(&self, spec: &ConversionSpecifier) -> Result<String> {
-        match spec.conversion_type {
-            ConversionType::DecInt => (*self as i64).format(spec),
-            ConversionType::HexIntLower | ConversionType::HexIntUpper | ConversionType::OctInt => {
-                (*self as u8).format(spec)
-            }
-            // c_char
-            ConversionType::Char => (*self as u8).format(spec),
-            _ => Err(FormatError::WrongType),
-        }
-    }
-    fn as_int(&self) -> Option<i32> {
-        Some(*self as i32)
-    }
-}
-
-impl Format for u8 {
-    fn format(&self, spec: &ConversionSpecifier) -> Result<String> {
-        match spec.conversion_type {
-            ConversionType::Char => {
-                if self.is_ascii() {
-                    char::from(*self).format(spec)
-                } else {
-                    Err(FormatError::WrongType)
-                }
-            }
-            _ => (*self as u64).format(spec),
-        }
-    }
-    fn as_int(&self) -> Option<i32> {
-        Some(*self as i32)
-    }
-}
-
-impl Format for usize {
-    fn format(&self, spec: &ConversionSpecifier) -> Result<String> {
-        (*self as u64).format(spec)
-    }
-    fn as_int(&self) -> Option<i32> {
         i32::try_from(*self).ok()
     }
 }
 
-impl Format for isize {
-    fn format(&self, spec: &ConversionSpecifier) -> Result<String> {
-        (*self as u64).format(spec)
-    }
-    fn as_int(&self) -> Option<i32> {
-        i32::try_from(*self).ok()
-    }
+macro_rules! impl_format_for_int {
+    ($($t:ty),*) => {
+        $(
+            impl Format for $t {
+                fn format(&self, spec: &ConversionSpecifier) -> Result<String> {
+                    (*self as i64).format(spec)
+                }
+                fn as_int(&self) -> Option<i32> {
+                    i32::try_from(*self as i64).ok()
+                }
+            }
+        )*
+    };
 }
+
+impl_format_for_int!(i8, i16, i32, u8, u16, u32, u64, usize, isize);
 
 impl Format for f64 {
     fn format(&self, spec: &ConversionSpecifier) -> Result<String> {
@@ -512,6 +445,15 @@ impl Format for &str {
     }
 }
 
+impl Format for String {
+    fn format(&self, spec: &ConversionSpecifier) -> Result<String> {
+        (self as &str).format(spec)
+    }
+    fn as_int(&self) -> Option<i32> {
+        None
+    }
+}
+
 impl Format for char {
     fn format(&self, spec: &ConversionSpecifier) -> Result<String> {
         if spec.conversion_type == ConversionType::Char {
@@ -538,55 +480,6 @@ impl Format for char {
         } else {
             Err(FormatError::WrongType)
         }
-    }
-    fn as_int(&self) -> Option<i32> {
-        None
-    }
-}
-
-impl Format for String {
-    fn format(&self, spec: &ConversionSpecifier) -> Result<String> {
-        (self as &str).format(spec)
-    }
-    fn as_int(&self) -> Option<i32> {
-        None
-    }
-}
-
-impl Format for &CStr {
-    fn format(&self, spec: &ConversionSpecifier) -> Result<String> {
-        if let Ok(s) = self.to_str() {
-            s.format(spec)
-        } else {
-            Err(FormatError::WrongType)
-        }
-    }
-    fn as_int(&self) -> Option<i32> {
-        None
-    }
-}
-
-impl Format for CString {
-    fn format(&self, spec: &ConversionSpecifier) -> Result<String> {
-        self.as_c_str().format(spec)
-    }
-    fn as_int(&self) -> Option<i32> {
-        None
-    }
-}
-
-impl<T> Format for *const T {
-    fn format(&self, spec: &ConversionSpecifier) -> Result<String> {
-        (*self as usize).format(spec)
-    }
-    fn as_int(&self) -> Option<i32> {
-        None
-    }
-}
-
-impl<T> Format for *mut T {
-    fn format(&self, spec: &ConversionSpecifier) -> Result<String> {
-        (*self as usize).format(spec)
     }
     fn as_int(&self) -> Option<i32> {
         None
