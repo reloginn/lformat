@@ -76,8 +76,15 @@ fn test_float_formats() {
     let s = format("%E", &[&1.5f64]).unwrap();
     assert!(s.contains("1.500000E+00") || s.contains("1.500000E+0"));
 
+    let s = format("%G", &[&1]).unwrap();
+    assert_eq!(s, "1");
+
+    let s = format("%G", &[&1000010.0]).unwrap();
+    assert_eq!(s, "1.00001e+06");
+
     let s = format("%G", &[&1.5f64]).unwrap();
     assert_eq!(s, "1.5");
+
 }
 
 #[test]

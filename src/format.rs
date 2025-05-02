@@ -158,6 +158,16 @@ impl Format for i64 {
                 }
                 Err(FormatError::WrongType)
             }
+            ConversionType::DecFloatLower | 
+            ConversionType::DecFloatUpper | 
+            ConversionType::SciFloatLower | 
+            ConversionType::SciFloatUpper | 
+            ConversionType::CompactFloatLower | 
+            ConversionType::CompactFloatUpper | 
+            ConversionType::HexFloatLower | 
+            ConversionType::HexFloatUpper => {
+                (*self as f64).format(spec)
+            }
             _ => Err(FormatError::WrongType),
         }
     }
