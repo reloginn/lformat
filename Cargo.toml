@@ -1,7 +1,7 @@
 [package]
 name = "lformat"
-version = "0.2.1"
-edition = "2024"
+version = "0.2.2"
+edition = "2021"
 authors = ["Thomas Jollans <tjol@tjol.eu>", "lyranowl <nikita.malina23@gmail.com>"]
 license = "MIT"
 description = "Clone of Lua `string.format` in Rust based on C `s(n)printf`"
